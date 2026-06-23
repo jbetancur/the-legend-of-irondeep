@@ -1,0 +1,18 @@
+[
+  {
+    "name": "Skeleton",
+    "hp": 8,
+    "ac": 7,
+    "sprite": "skeleton",
+    "detectDist": 6,
+    "speed": 40
+  },
+  {
+    "name": "Skeleton Warrior",
+    "hp": 14,
+    "ac": 5,
+    "sprite": "skeleton",
+    "detectDist": 7,
+    "speed": 35
+  }
+]

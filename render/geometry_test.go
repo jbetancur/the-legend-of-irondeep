@@ -26,21 +26,12 @@ func TestCellScaling(t *testing.T) {
 	}
 }
 
-func TestViewportIsSquare(t *testing.T) {
-	if ViewportW != ViewportH {
-		t.Errorf("viewport should be square: %dx%d", ViewportW, ViewportH)
-	}
-	if ViewportW != 540 {
-		t.Errorf("viewport size = %d, want 540", ViewportW)
-	}
-}
-
 func TestDepthZeroIsFullViewport(t *testing.T) {
 	c := cellRect(0, 0)
-	if !approxEq(c.w, ViewportW) {
+	if !approxEq(c.w, float64(ViewportW)) {
 		t.Errorf("depth 0 width = %f, want %f", c.w, float64(ViewportW))
 	}
-	if !approxEq(c.h, ViewportH) {
+	if !approxEq(c.h, float64(ViewportH)) {
 		t.Errorf("depth 0 height = %f, want %f", c.h, float64(ViewportH))
 	}
 }

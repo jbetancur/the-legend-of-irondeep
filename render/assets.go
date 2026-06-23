@@ -10,13 +10,15 @@ import (
 )
 
 type Assets struct {
-	FrontWall *ebiten.Image
-	SideWallL *ebiten.Image
-	SideWallR *ebiten.Image
-	Door      *ebiten.Image
-	Floor     *ebiten.Image
-	Ceiling   *ebiten.Image
-	Monsters  map[string]*ebiten.Image
+	FrontWall  *ebiten.Image
+	SideWallL  *ebiten.Image
+	SideWallR  *ebiten.Image
+	Door       *ebiten.Image
+	DoorFrameL *ebiten.Image
+	DoorFrameR *ebiten.Image
+	Floor      *ebiten.Image
+	Ceiling    *ebiten.Image
+	Monsters   map[string]*ebiten.Image
 }
 
 func loadTexture(path string) *ebiten.Image {
@@ -35,15 +37,34 @@ func loadTexture(path string) *ebiten.Image {
 func NewAssets(wallset string) *Assets {
 	dir := "assets/textures/" + wallset + "/"
 	sideWall := loadTexture(dir + "wall_side.png")
-	return &Assets{
-		FrontWall: loadTexture(dir + "wall_front.png"),
-		SideWallL: sideWall,
-		SideWallR: sideWall,
-		Door:      loadTexture(dir + "door.png"),
-		Floor:     loadTexture(dir + "floor.png"),
-		Ceiling:   loadTexture(dir + "ceiling.png"),
-		Monsters:  loadMonsterSprites(),
+	doorFrame := loadTextureOptional(dir + "door_frame.png")
+	if doorFrame == nil {
+		doorFrame = sideWall
 	}
+	return &Assets{
+		FrontWall:  loadTexture(dir + "wall_front.png"),
+		SideWallL:  sideWall,
+		SideWallR:  sideWall,
+		Door:       loadTexture(dir + "door.png"),
+		DoorFrameL: doorFrame,
+		DoorFrameR: doorFrame,
+		Floor:      loadTexture(dir + "floor.png"),
+		Ceiling:    loadTexture(dir + "ceiling.png"),
+		Monsters:   loadMonsterSprites(),
+	}
+}
+
+func loadTextureOptional(path string) *ebiten.Image {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil
+	}
+	defer f.Close()
+	img, _, err := image.Decode(f)
+	if err != nil {
+		return nil
+	}
+	return ebiten.NewImageFromImage(img)
 }
 
 func loadMonsterSprites() map[string]*ebiten.Image {

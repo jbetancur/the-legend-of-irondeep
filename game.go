@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"image/color"
 	"image/png"
 	"os"
 
@@ -32,10 +31,11 @@ type walkView struct {
 }
 
 func NewGame() *Game {
-	world := engine.BuildTestLevel()
-	party := engine.NewParty(world, 4, 12, engine.North)
+	engine.LoadMonsterTypes("data/monsters.json")
+	world, px, py, facing := engine.LoadLevel("data/levels/level1.json")
+	party := engine.NewParty(world, px, py, facing)
 	assets := render.NewAssets(world.Wallset)
-	viewport := render.NewViewport(assets)
+	viewport := render.NewViewport(assets, ScreenWidth, ScreenHeight)
 	ui := render.NewUI()
 
 	return &Game{
@@ -43,21 +43,20 @@ func NewGame() *Game {
 		viewport: viewport,
 		ui:       ui,
 		walkViews: []walkView{
-			{4, 12, engine.North, "01_corridor_far"},
-			{4, 11, engine.North, "02_corridor_d11"},
-			{4, 10, engine.North, "03_corridor_d10"},
-			{4, 9, engine.North, "04_near_junction"},
-			{4, 8, engine.North, "05_at_junction_N"},
-			{4, 8, engine.East, "06_at_junction_E"},
-			{4, 8, engine.West, "07_at_junction_W"},
-			{4, 8, engine.South, "08_at_junction_S"},
-			{4, 7, engine.North, "09_past_junction"},
-			{4, 5, engine.North, "10_chamber_N"},
-			{4, 5, engine.East, "11_chamber_E"},
-			{4, 5, engine.West, "12_chamber_W"},
-			{4, 12, engine.South, "13_dead_end_S"},
-			{4, 12, engine.East, "14_dead_end_E"},
-			{4, 12, engine.West, "15_dead_end_W"},
+			{12, 22, engine.North, "01_entrance"},
+			{12, 21, engine.North, "02_entry_hall"},
+			{5, 16, engine.North, "03_west_corridor"},
+			{5, 16, engine.East, "04_west_corridor_E"},
+			{10, 13, engine.North, "05_central_chamber"},
+			{10, 13, engine.East, "06_central_chamber_E"},
+			{10, 13, engine.West, "07_central_chamber_W"},
+			{2, 9, engine.North, "08_north_hall"},
+			{2, 9, engine.East, "09_north_hall_E"},
+			{10, 5, engine.North, "10_upper_passage"},
+			{3, 2, engine.East, "11_west_room"},
+			{18, 2, engine.West, "12_east_room"},
+			{21, 16, engine.West, "13_door_approach"},
+			{21, 19, engine.North, "14_east_alcove"},
 		},
 	}
 }
@@ -70,6 +69,7 @@ func (g *Game) Update() error {
 	if g.walkDir == "" {
 		g.input.HandleInput(g.party)
 	}
+	g.party.World.UpdateDoors()
 	g.party.World.UpdateMonsters()
 	return nil
 }
@@ -80,10 +80,8 @@ func (g *Game) Draw(screen *ebiten.Image) {
 		return
 	}
 
-	screen.Fill(color.RGBA{15, 12, 10, 255})
 	g.viewport.Draw(screen, g.party)
 	g.ui.Draw(screen, g.party)
-	ebitenutil.DebugPrint(screen, "The Legend of Irondeep")
 
 	if g.shotPath != "" {
 		g.frame++
@@ -110,10 +108,9 @@ func (g *Game) drawWalkthrough(screen *ebiten.Image) {
 	g.party.Y = v.y
 	g.party.Facing = v.dir
 
-	screen.Fill(color.RGBA{15, 12, 10, 255})
 	g.viewport.Draw(screen, g.party)
 	g.ui.Draw(screen, g.party)
-	ebitenutil.DebugPrint(screen, fmt.Sprintf("The Legend of Irondeep — %s", v.name))
+	ebitenutil.DebugPrint(screen, v.name)
 
 	path := fmt.Sprintf("%s/%s.png", g.walkDir, v.name)
 	g.saveShot(screen, path)

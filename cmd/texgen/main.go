@@ -27,6 +27,7 @@ func main() {
 	save(dir+"/floor.png", generateFloor())
 	save(dir+"/ceiling.png", generateCeiling())
 	save(dir+"/door.png", generateDoor())
+	save(dir+"/door_frame.png", generateDoorFrame())
 }
 
 func save(path string, img image.Image) {
@@ -700,6 +701,184 @@ func generateDoor() image.Image {
 				g *= (1.0 - shadow)
 				b *= (1.0 - shadow)
 			}
+
+			img.SetRGBA(px, py, color.RGBA{clampU8(r), clampU8(g), clampU8(b), 255})
+		}
+	}
+
+	return img
+}
+
+func generateDoorFrame() image.Image {
+	img := image.NewRGBA(image.Rect(0, 0, texW, texH))
+	n1 := newNoise(91)
+	n2 := newNoise(263)
+	n3 := newNoise(401)
+	rng := rand.New(rand.NewSource(53))
+
+	baseR, baseG, baseB := 95.0, 87.0, 74.0
+	mortarR, mortarG, mortarB := 48.0, 43.0, 37.0
+
+	type block struct {
+		x, y, w, h           int
+		rOff, gOff, bOff     float64
+	}
+
+	var blocks []block
+	rowH := []int{64, 58, 70, 56, 62, 66, 54, 68}
+	mortarW := 3
+	y := 0
+	row := 0
+	for y < texH {
+		h := rowH[row%len(rowH)]
+		if y+h > texH {
+			h = texH - y
+		}
+		colW := []int{85, 75, 95, 80}
+		offset := 0
+		if row%2 == 1 {
+			offset = colW[0] / 2
+		}
+		x := -offset
+		col := 0
+		for x < texW {
+			w := colW[col%len(colW)]
+			blocks = append(blocks, block{
+				x: x, y: y, w: w, h: h,
+				rOff: rng.Float64()*14 - 7,
+				gOff: rng.Float64()*14 - 7,
+				bOff: rng.Float64()*10 - 5,
+			})
+			x += w + mortarW
+			col++
+		}
+		y += h + mortarW
+		row++
+	}
+
+	// Door track: a vertical groove centered in the texture
+	trackWidth := texW / 5
+	trackLeft := (texW - trackWidth) / 2
+	trackRight := trackLeft + trackWidth
+	trackInset := 10
+
+	for py := 0; py < texH; py++ {
+		for px := 0; px < texW; px++ {
+			fx := float64(px) / float64(texW)
+			fy := float64(py) / float64(texH)
+
+			inTrack := px >= trackLeft && px <= trackRight
+
+			inMortar := false
+			var blk *block
+			if !inTrack {
+				for i := range blocks {
+					b := &blocks[i]
+					bx := px
+					if bx < b.x {
+						bx += texW
+					}
+					if bx >= b.x && bx < b.x+b.w && py >= b.y && py < b.y+b.h {
+						dx := min(bx-b.x, b.x+b.w-1-bx)
+						dy := min(py-b.y, b.y+b.h-1-py)
+						if dx < mortarW || dy < mortarW {
+							inMortar = true
+						} else {
+							blk = b
+						}
+						break
+					}
+				}
+			}
+
+			var r, g, b float64
+
+			if inTrack {
+				// Recessed groove — darker stone with vertical scoring
+				r, g, b = 42.0, 38.0, 32.0
+
+				// Vertical score marks from the door sliding
+				score := n1.fbm(fx*4, fy*40, 3, 2.0, 0.5)
+				r += score * 6
+				g += score * 5
+				b += score * 4
+
+				grain := n2.fbm(fx*20, fy*20, 3, 2.0, 0.5)
+				r += grain * 4
+				g += grain * 3
+				b += grain * 3
+
+				// Edge shadow at track borders
+				distToLeft := float64(px - trackLeft)
+				distToRight := float64(trackRight - px)
+				edgeDist := math.Min(distToLeft, distToRight)
+				if edgeDist < float64(trackInset) {
+					shadow := 1.0 - (float64(trackInset)-edgeDist)/float64(trackInset)*0.5
+					r *= shadow
+					g *= shadow
+					b *= shadow
+				}
+
+				// Wear/polish in the center of the track
+				center := float64(trackLeft+trackRight) / 2
+				distToCenter := math.Abs(float64(px) - center)
+				maxDist := float64(trackRight-trackLeft) / 2
+				if distToCenter < maxDist*0.4 {
+					polish := 1.0 + (1.0-distToCenter/(maxDist*0.4))*0.15
+					r *= polish
+					g *= polish
+					b *= polish
+				}
+			} else if inMortar || blk == nil {
+				mn := n1.fbm(fx*18, fy*18, 3, 2.0, 0.5) * 8
+				r = mortarR + mn
+				g = mortarG + mn*0.9
+				b = mortarB + mn*0.8
+				r *= 0.8
+				g *= 0.8
+				b *= 0.8
+			} else {
+				r = baseR + blk.rOff
+				g = baseG + blk.gOff
+				b = baseB + blk.bOff
+
+				surf := n1.fbm(fx*8+blk.rOff*0.1, fy*8+blk.gOff*0.1, 5, 2.2, 0.55)
+				r += surf * 18
+				g += surf * 16
+				b += surf * 13
+
+				grain := n2.fbm(fx*30, fy*30, 3, 2.0, 0.5)
+				r += grain * 7
+				g += grain * 6
+				b += grain * 5
+
+				crack := n3.fbm(fx*12, fy*12, 4, 2.5, 0.6)
+				if crack > 0.35 {
+					darkening := (crack - 0.35) * 25
+					r -= darkening
+					g -= darkening
+					b -= darkening
+				}
+
+				bx := px
+				if bx < blk.x {
+					bx += texW
+				}
+				dx := float64(min(bx-blk.x, blk.x+blk.w-1-bx))
+				dy := float64(min(py-blk.y, blk.y+blk.h-1-py))
+				edgeDist := math.Min(dx, dy)
+				if edgeDist < 8 {
+					ao := 1.0 - (8-edgeDist)/8*0.3
+					r *= ao
+					g *= ao
+					b *= ao
+				}
+			}
+
+			moistGrad := 1.0 - fy*0.12
+			r *= moistGrad
+			g *= moistGrad
+			b *= moistGrad
 
 			img.SetRGBA(px, py, color.RGBA{clampU8(r), clampU8(g), clampU8(b), 255})
 		}

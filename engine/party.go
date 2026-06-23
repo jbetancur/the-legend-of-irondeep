@@ -1,6 +1,11 @@
 package engine
 
-import "github.com/hajimehoshi/ebiten/v2"
+import (
+	"math/rand"
+
+	"github.com/hajimehoshi/ebiten/v2"
+	"github.com/hajimehoshi/ebiten/v2/inpututil"
+)
 
 type Party struct {
 	X      int
@@ -96,6 +101,11 @@ type InputState struct {
 const inputCooldownTicks = 10
 
 func (s *InputState) HandleInput(party *Party) {
+	// Interact fires once per keypress, independent of the movement cooldown.
+	if inpututil.IsKeyJustPressed(ebiten.KeySpace) {
+		party.Interact()
+	}
+
 	if s.cooldown > 0 {
 		s.cooldown--
 		return
@@ -122,4 +132,28 @@ func (s *InputState) HandleInput(party *Party) {
 	if moved {
 		s.cooldown = inputCooldownTicks
 	}
+}
+
+func (p *Party) Interact() bool {
+	dx, dy := p.Facing.Delta()
+	tx, ty := p.X+dx, p.Y+dy
+	if p.World.ToggleDoor(tx, ty) {
+		return true
+	}
+	return p.Attack()
+}
+
+func (p *Party) Attack() bool {
+	dx, dy := p.Facing.Delta()
+	tx, ty := p.X+dx, p.Y+dy
+	monsters := p.World.MonstersAt(tx, ty)
+	if len(monsters) == 0 {
+		return false
+	}
+	m := monsters[0]
+	m.HP -= 2 + rand.Intn(4) // 2-5 damage placeholder
+	if m.HP <= 0 {
+		p.World.RemoveMonster(m)
+	}
+	return true
 }

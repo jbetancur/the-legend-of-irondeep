@@ -8,9 +8,13 @@ import (
 )
 
 const (
+	BaseViewportH = 540
+	maxDepth      = 2
+)
+
+var (
 	ViewportW = 540
 	ViewportH = 540
-	maxDepth  = 3
 )
 
 type Viewport struct {
@@ -18,7 +22,10 @@ type Viewport struct {
 	Image  *ebiten.Image
 }
 
-func NewViewport(assets *Assets) *Viewport {
+func NewViewport(assets *Assets, screenW, screenH int) *Viewport {
+	aspect := float64(screenW) / float64(screenH)
+	ViewportW = int(float64(BaseViewportH) * aspect)
+	ViewportH = BaseViewportH
 	return &Viewport{
 		Assets: assets,
 		Image:  ebiten.NewImage(ViewportW, ViewportH),
@@ -28,18 +35,15 @@ func NewViewport(assets *Assets) *Viewport {
 func (v *Viewport) Draw(screen *ebiten.Image, party *engine.Party) {
 	v.Image.Fill(color.RGBA{5, 4, 3, 255})
 
-	// Backdrop: ceiling fills top half, floor fills bottom half.
-	// Per EoB2 source, this is a single pre-rendered backdrop (shape #18).
-	// We simulate it with gradient shading: bright at the edges (near player),
-	// dark at the horizon (vanishing point center).
 	midY := float64(ViewportH) / 2
+	vpW := float64(ViewportW)
+	vpH := float64(ViewportH)
 	darkest := cellShade(maxDepth + 1)
-	v.drawQuad(v.Assets.Ceiling, 0, 0, ViewportW, 0, ViewportW, midY, 0, midY,
+	v.drawQuad(v.Assets.Ceiling, 0, 0, vpW, 0, vpW, midY, 0, midY,
 		[4]float32{1, 1, darkest, darkest})
-	v.drawQuad(v.Assets.Floor, 0, midY, ViewportW, midY, ViewportW, ViewportH, 0, ViewportH,
+	v.drawQuad(v.Assets.Floor, 0, midY, vpW, midY, vpW, vpH, 0, vpH,
 		[4]float32{darkest, darkest, 1, 1})
 
-	// Render cells from far to near so closer walls overdraw farther ones.
 	for depth := maxDepth; depth >= 0; depth-- {
 		minCol, maxCol := columnRange(depth)
 		for col := minCol; col <= maxCol; col++ {
@@ -47,9 +51,9 @@ func (v *Viewport) Draw(screen *ebiten.Image, party *engine.Party) {
 		}
 	}
 
+	sw, sh := screen.Bounds().Dx(), screen.Bounds().Dy()
 	op := &ebiten.DrawImageOptions{}
-	op.GeoM.Scale(float64(viewportDisplayW)/ViewportW, float64(viewportDisplayH)/ViewportH)
-	op.GeoM.Translate(viewportScreenX, viewportScreenY)
+	op.GeoM.Scale(float64(sw)/vpW, float64(sh)/vpH)
 	screen.DrawImage(v.Image, op)
 }
 
@@ -84,7 +88,11 @@ func (v *Viewport) drawCell(party *engine.Party, depth, col int) {
 	if w.IsWall(leftCellX, leftCellY) {
 		x0, y0, x1, y1, x2, y2, x3, y3 := leftWallQuad(depth, col)
 		s := [4]float32{shade, innerShade, innerShade, shade}
-		v.drawQuad(v.Assets.SideWallL, x0, y0, x1, y1, x2, y2, x3, y3, s)
+		tex := v.Assets.SideWallL
+		if w.IsDoorFrame(leftCellX, leftCellY) {
+			tex = v.Assets.DoorFrameL
+		}
+		v.drawQuad(tex, x0, y0, x1, y1, x2, y2, x3, y3, s)
 	}
 
 	rightCellX := cx - ldx
@@ -92,7 +100,11 @@ func (v *Viewport) drawCell(party *engine.Party, depth, col int) {
 	if w.IsWall(rightCellX, rightCellY) {
 		x0, y0, x1, y1, x2, y2, x3, y3 := rightWallQuad(depth, col)
 		s := [4]float32{innerShade, shade, shade, innerShade}
-		v.drawQuad(v.Assets.SideWallR, x0, y0, x1, y1, x2, y2, x3, y3, s)
+		tex := v.Assets.SideWallR
+		if w.IsDoorFrame(rightCellX, rightCellY) {
+			tex = v.Assets.DoorFrameR
+		}
+		v.drawQuad(tex, x0, y0, x1, y1, x2, y2, x3, y3, s)
 	}
 
 	aheadX := cx + dx
@@ -102,46 +114,78 @@ func (v *Viewport) drawCell(party *engine.Party, depth, col int) {
 		v.blitRect(v.Assets.FrontWall, bw, cellShade(depth+1))
 	}
 	if w.IsDoor(aheadX, aheadY) {
-		bw := backWallRect(depth, col)
-		v.blitRect(v.Assets.Door, bw, cellShade(depth+1))
+		progress := w.DoorProgress(aheadX, aheadY)
+		if progress < 1.0 {
+			bw := backWallRect(depth, col)
+			visibleH := bw.h * (1.0 - progress)
+			dstTop := bw.y + bw.h - visibleH
+			sh := cellShade(depth + 1)
+			v.drawDoorSlice(v.Assets.Door, bw.x, dstTop, bw.w, visibleH, progress, sh)
+		}
 	}
 
 	monsters := w.MonstersAt(cx, cy)
-	for _, m := range monsters {
-		sprite := v.Assets.Monsters[m.Type.Sprite]
+	count := len(monsters)
+	if count > 2 {
+		count = 2
+	}
+	for i := 0; i < count; i++ {
+		sprite := v.Assets.Monsters[monsters[i].Type.Sprite]
 		if sprite == nil {
 			continue
 		}
-		v.drawMonster(sprite, depth, col, shade)
+		v.drawMonster(sprite, depth, col, shade, i, count)
 	}
 }
 
-func (v *Viewport) drawMonster(sprite *ebiten.Image, depth, col int, shade float32) {
+func (v *Viewport) drawMonster(sprite *ebiten.Image, depth, col int, shade float32, index, total int) {
 	c := cellRect(depth, col)
-	bw := backWallRect(depth, col)
 
 	sw := float64(sprite.Bounds().Dx())
 	sh := float64(sprite.Bounds().Dy())
 	aspect := sw / sh
 
-	// Fit the sprite within the back wall area (the "floor" of this cell)
-	fitH := bw.h * 0.85
+	fitH := c.h * 0.85
 	fitW := fitH * aspect
-	if fitW > bw.w*0.8 {
-		fitW = bw.w * 0.8
+	maxW := c.w * 0.7
+	if total == 2 {
+		maxW = c.w * 0.45
+	}
+	if fitW > maxW {
+		fitW = maxW
 		fitH = fitW / aspect
 	}
 
-	// Center horizontally in the cell, bottom-aligned to cell floor
 	midX := c.x + c.w/2
+	if total == 2 {
+		if index == 0 {
+			midX = c.x + c.w*0.3
+		} else {
+			midX = c.x + c.w*0.7
+		}
+	}
 	dstX := midX - fitW/2
-	dstY := c.y + c.h - fitH - (c.h-bw.h)/2*0.3
+	dstY := c.y + c.h - fitH - c.h*0.02
 
 	op := &ebiten.DrawImageOptions{}
 	op.GeoM.Scale(fitW/sw, fitH/sh)
 	op.GeoM.Translate(dstX, dstY)
 	op.ColorScale.Scale(shade, shade, shade, 1)
 	v.Image.DrawImage(sprite, op)
+}
+
+func (v *Viewport) drawDoorSlice(tex *ebiten.Image, dstX, dstY, dstW, dstH, progress float64, shade float32) {
+	tw := float32(tex.Bounds().Dx())
+	th := float32(tex.Bounds().Dy())
+	srcTop := th * float32(progress)
+	vtx := []ebiten.Vertex{
+		{DstX: float32(dstX), DstY: float32(dstY), SrcX: 0, SrcY: srcTop, ColorR: shade, ColorG: shade, ColorB: shade, ColorA: 1},
+		{DstX: float32(dstX + dstW), DstY: float32(dstY), SrcX: tw, SrcY: srcTop, ColorR: shade, ColorG: shade, ColorB: shade, ColorA: 1},
+		{DstX: float32(dstX + dstW), DstY: float32(dstY + dstH), SrcX: tw, SrcY: th, ColorR: shade, ColorG: shade, ColorB: shade, ColorA: 1},
+		{DstX: float32(dstX), DstY: float32(dstY + dstH), SrcX: 0, SrcY: th, ColorR: shade, ColorG: shade, ColorB: shade, ColorA: 1},
+	}
+	idx := []uint16{0, 1, 2, 0, 2, 3}
+	v.Image.DrawTriangles(vtx, idx, tex, &ebiten.DrawTrianglesOptions{})
 }
 
 func cellShade(depth int) float32 {

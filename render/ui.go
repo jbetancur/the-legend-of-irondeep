@@ -9,78 +9,74 @@ import (
 	"github.com/jbetancur/the-legend-of-irondeep/engine"
 )
 
-type UI struct {
-	barBg    *ebiten.Image
-	sideFill *ebiten.Image
-}
+type UI struct{}
 
 func NewUI() *UI {
-	bg := ebiten.NewImage(ScreenW, partyBarH)
-	bg.Fill(color.RGBA{38, 32, 28, 255})
-	sep := color.RGBA{70, 60, 52, 255}
-	for x := 0; x < ScreenW; x++ {
-		bg.Set(x, 0, sep)
-		bg.Set(x, 1, sep)
-	}
-
-	side := ebiten.NewImage(viewportScreenX, viewportDisplayH)
-	side.Fill(color.RGBA{22, 19, 17, 255})
-
-	return &UI{barBg: bg, sideFill: side}
+	return &UI{}
 }
 
 func (u *UI) Draw(screen *ebiten.Image, party *engine.Party) {
-	// Fill the dark margins beside the centered viewport.
-	left := &ebiten.DrawImageOptions{}
-	screen.DrawImage(u.sideFill, left)
-	right := &ebiten.DrawImageOptions{}
-	right.GeoM.Translate(viewportScreenX+viewportDisplayW, 0)
-	screen.DrawImage(u.sideFill, right)
-
 	u.drawMinimap(screen, party)
+	u.drawPartyOverlay(screen)
+
+	info := fmt.Sprintf("Pos: %d, %d   Facing: %s", party.X, party.Y, party.Facing)
+	ebitenutil.DebugPrintAt(screen, info, 10, ScreenH-20)
+}
+
+func (u *UI) drawPartyOverlay(screen *ebiten.Image) {
+	panelW := 440
+	panelH := 280
+	px := ScreenW - panelW - 16
+	py := ScreenH - panelH - 16
+
+	bg := ebiten.NewImage(panelW, panelH)
+	bg.Fill(color.RGBA{20, 18, 15, 180})
 
 	op := &ebiten.DrawImageOptions{}
-	op.GeoM.Translate(0, partyBarY)
-	screen.DrawImage(u.barBg, op)
+	op.GeoM.Translate(float64(px), float64(py))
+	screen.DrawImage(bg, op)
 
-	// Status line above the character slots.
-	info := fmt.Sprintf("Pos: %d, %d   Facing: %s        WASD/Arrows: Move/Turn    Q/E: Strafe    ESC: Quit",
-		party.X, party.Y, party.Facing)
-	ebitenutil.DebugPrintAt(screen, info, 24, partyBarY+16)
+	border := color.RGBA{90, 78, 66, 200}
+	for x := 0; x < panelW; x++ {
+		bg.Set(x, 0, border)
+		bg.Set(x, panelH-1, border)
+	}
+	for y := 0; y < panelH; y++ {
+		bg.Set(0, y, border)
+		bg.Set(panelW-1, y, border)
+	}
+	screen.DrawImage(bg, op)
 
-	// Four character slots in a horizontal row.
-	pad := 24
-	top := partyBarY + 48
-	gap := 16
-	slotH := partyBarH - 48 - pad
-	totalGaps := gap * 3
-	slotW := (ScreenW - pad*2 - totalGaps) / 4
-
+	gap := 8
+	slotW := (panelW - gap*5) / 4
+	slotH := panelH - gap*2
 	for i := 0; i < 4; i++ {
-		x := pad + i*(slotW+gap)
-		drawCharSlot(screen, x, top, slotW, slotH, i+1)
+		sx := px + gap + i*(slotW+gap)
+		sy := py + gap
+		drawCharSlot(screen, sx, sy, slotW, slotH, i+1)
 	}
 }
 
 func (u *UI) drawMinimap(screen *ebiten.Image, party *engine.Party) {
 	w := party.World
-	cellSize := 14
+	cellSize := 10
 	mapW := w.Width * cellSize
 	mapH := w.Height * cellSize
+	pad := 12
 
-	// Position in the left margin, vertically centered
-	ox := (viewportScreenX - mapW) / 2
-	if ox < 8 {
-		ox = 8
-	}
-	oy := (viewportDisplayH - mapH) / 2
-	if oy < 8 {
-		oy = 8
-	}
+	bg := ebiten.NewImage(mapW+pad*2, mapH+pad*2)
+	bg.Fill(color.RGBA{10, 9, 8, 160})
+	bgOp := &ebiten.DrawImageOptions{}
+	bgOp.GeoM.Translate(float64(pad/2), float64(pad/2))
+	screen.DrawImage(bg, bgOp)
+
+	ox := pad
+	oy := pad
 
 	wall := color.RGBA{70, 65, 58, 255}
 	floor := color.RGBA{30, 26, 22, 255}
-	border := color.RGBA{50, 45, 40, 255}
+	doorColor := color.RGBA{100, 70, 40, 255}
+	cellBorder := color.RGBA{50, 45, 40, 255}
 
 	for y := 0; y < w.Height; y++ {
 		for x := 0; x < w.Width; x++ {
@@ -89,13 +85,14 @@ func (u *UI) drawMinimap(screen *ebiten.Image, party *engine.Party) {
 			c := wall
 			if w.IsPassable(x, y) {
 				c = floor
+			} else if w.IsDoor(x, y) {
+				c = doorColor
 			}
 			cell := ebiten.NewImage(cellSize, cellSize)
 			cell.Fill(c)
-			// border between cells
 			for i := 0; i < cellSize; i++ {
-				cell.Set(i, 0, border)
-				cell.Set(0, i, border)
+				cell.Set(i, 0, cellBorder)
+				cell.Set(0, i, cellBorder)
 			}
 			op := &ebiten.DrawImageOptions{}
 			op.GeoM.Translate(float64(px), float64(py))
@@ -103,32 +100,30 @@ func (u *UI) drawMinimap(screen *ebiten.Image, party *engine.Party) {
 		}
 	}
 
-	// Party position
-	px := ox + party.X*cellSize + cellSize/2
-	py := oy + party.Y*cellSize + cellSize/2
+	ppx := ox + party.X*cellSize + cellSize/2
+	ppy := oy + party.Y*cellSize + cellSize/2
 	partyColor := color.RGBA{220, 180, 40, 255}
 	dot := ebiten.NewImage(6, 6)
 	dot.Fill(partyColor)
-	op := &ebiten.DrawImageOptions{}
-	op.GeoM.Translate(float64(px-3), float64(py-3))
-	screen.DrawImage(dot, op)
+	dotOp := &ebiten.DrawImageOptions{}
+	dotOp.GeoM.Translate(float64(ppx-3), float64(ppy-3))
+	screen.DrawImage(dot, dotOp)
 
-	// Facing indicator
 	fdx, fdy := party.Facing.Delta()
-	arrowX := px + fdx*5
-	arrowY := py + fdy*5
+	arrowX := ppx + fdx*5
+	arrowY := ppy + fdy*5
 	arrow := ebiten.NewImage(4, 4)
 	arrow.Fill(color.RGBA{255, 220, 60, 255})
-	op2 := &ebiten.DrawImageOptions{}
-	op2.GeoM.Translate(float64(arrowX-2), float64(arrowY-2))
-	screen.DrawImage(arrow, op2)
+	arrowOp := &ebiten.DrawImageOptions{}
+	arrowOp.GeoM.Translate(float64(arrowX-2), float64(arrowY-2))
+	screen.DrawImage(arrow, arrowOp)
 }
 
 func drawCharSlot(screen *ebiten.Image, x, y, w, h, slot int) {
 	img := ebiten.NewImage(w, h)
-	img.Fill(color.RGBA{52, 46, 40, 255})
+	img.Fill(color.RGBA{40, 36, 30, 200})
 
-	border := color.RGBA{90, 78, 66, 255}
+	border := color.RGBA{80, 70, 58, 220}
 	for px := 0; px < w; px++ {
 		img.Set(px, 0, border)
 		img.Set(px, h-1, border)
@@ -146,6 +141,6 @@ func drawCharSlot(screen *ebiten.Image, x, y, w, h, slot int) {
 	if slot > 2 {
 		rowName = "Back Row"
 	}
-	ebitenutil.DebugPrintAt(screen, fmt.Sprintf("Character %d", slot), x+12, y+12)
-	ebitenutil.DebugPrintAt(screen, rowName, x+12, y+32)
+	ebitenutil.DebugPrintAt(screen, fmt.Sprintf("Char %d", slot), x+8, y+8)
+	ebitenutil.DebugPrintAt(screen, rowName, x+8, y+24)
 }
